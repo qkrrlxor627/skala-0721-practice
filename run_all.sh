@@ -43,7 +43,7 @@ echo "=============== 1) 테스트 + 커버리지 ==============="
 
 echo ""
 echo "=============== 2) 실습 3 실행 ==============="
-"$PYTHON" 광주_1반_박기택.py | tee 실행결과.txt
+"$PYTHON" 실습3/광주_1반_박기택.py | tee 실습3/실행결과.txt
 # tee 를 거치면 $? 는 tee 의 결과가 되므로, 파이썬의 종료 코드를 따로 꺼낸다
 [ "${PIPESTATUS[0]}" -eq 0 ] || FAILED="$FAILED 실습3"
 
@@ -55,7 +55,7 @@ echo "=============== 3) 실습 4 실행 ==============="
 echo ""
 echo "=============== 4) 산출물 확인 ==============="
 for f in \
-    "Docs/result.md" \
+    "실습3/result.md" \
     "실습4/eda_2x2.png" \
     "실습4/sales_model.joblib" \
     "실습4/sales_by_region_category.html"
@@ -85,13 +85,13 @@ if [ "$1" = "open" ]; then
     echo "차트와 보고서를 엽니다..."
     open 실습4/eda_2x2.png
     open 실습4/sales_by_region_category.html
-    open Docs/result.md
+    open 실습3/result.md
 else
     echo ""
     echo "결과를 보려면:"
     echo "  open 실습4/eda_2x2.png                      # 2x2 차트 4종"
     echo "  open 실습4/sales_by_region_category.html    # Plotly 차트"
-    echo "  open Docs/result.md                         # 실습 3 보고서"
+    echo "  open 실습3/result.md                        # 실습 3 보고서"
     echo ""
     echo "또는 다음에 이렇게 실행하면 자동으로 열립니다:  bash run_all.sh open"
 fi

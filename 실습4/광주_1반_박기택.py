@@ -312,16 +312,22 @@ def setup_logging(base_dir):
 # ================================================================
 
 
-def find_data_file(base_dir, filename=DATA_FILE):
+def find_data_file(base_dir, filename=None):
     """
     [기능] 입력 파일을 스크립트 폴더와 그 상위 폴더에서 찾는다.
     [설명] 이 스크립트는 저장소에서 `실습4/` 안에 있고 원본 CSV 는 저장소 루트에 있다.
            반면 채점할 때는 스크립트와 CSV 를 같은 폴더에 두고 실행하는 경우가 많다.
            두 상황을 모두 지원하려고 가까운 곳부터 차례로 찾는다.
 
+           filename 의 기본값을 DATA_FILE 로 직접 적지 않고 None 으로 둔 이유:
+           기본값은 함수를 정의할 때 한 번만 계산되어 그 값이 그대로 굳는다.
+           나중에 DATA_FILE 을 바꿔도 기본값은 예전 이름을 계속 가리켜,
+           "분명히 파일명을 바꿨는데 옛 파일을 찾는다"는 혼란이 생긴다.
+           호출할 때마다 읽도록 미뤄 두면 그런 일이 없다.
+
     Args:
         base_dir (Path): 스크립트가 있는 폴더.
-        filename (str): 찾을 파일 이름.
+        filename (str | None): 찾을 파일 이름. None 이면 DATA_FILE 을 쓴다.
 
     Returns:
         Path: 찾은 파일 경로.
@@ -329,6 +335,7 @@ def find_data_file(base_dir, filename=DATA_FILE):
     Raises:
         FileNotFoundError: 두 곳 모두에 파일이 없는 경우.
     """
+    filename = filename or DATA_FILE
     candidates = [base_dir / filename, base_dir.parent / filename]
     for path in candidates:
         if path.exists():

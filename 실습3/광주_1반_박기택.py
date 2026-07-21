@@ -119,7 +119,7 @@ DATA_FILE = "sales_100k.csv"
 LOG_FILE = "실행로그.log"
 
 # 실측값으로 채워질 결과 보고서. 양식은 Docs/resultEx.md 를 따른다.
-REPORT_FILE = Path("Docs") / "result.md"
+REPORT_FILE = "result.md"
 
 # 집계 기준(그룹 키)과 집계 대상. 요구사항이 바뀌면 이 두 값만 고치면 된다.
 GROUP_KEYS = ["region", "category"]
@@ -262,6 +262,40 @@ def setup_logging(base_dir):
 # ================================================================
 # 2. 데이터 읽기와 기초 탐색(EDA)
 # ================================================================
+
+
+def find_data_file(base_dir, filename=None):
+    """
+    [기능] 입력 파일을 스크립트 폴더와 그 상위 폴더에서 찾는다.
+    [설명] 이 스크립트는 저장소에서 `실습3/` 안에 있고 원본 CSV 는 저장소 루트에 있다.
+           반면 채점할 때는 스크립트와 CSV 를 같은 폴더에 두고 실행하는 경우가 많다.
+           두 상황을 모두 지원하려고 가까운 곳부터 차례로 찾는다.
+
+           filename 의 기본값을 DATA_FILE 로 직접 적지 않고 None 으로 둔 이유:
+           기본값은 함수를 정의할 때 한 번만 계산되어 그 값이 그대로 굳는다.
+           나중에 DATA_FILE 을 바꿔도 기본값은 예전 이름을 계속 가리켜,
+           "분명히 파일명을 바꿨는데 옛 파일을 찾는다"는 혼란이 생긴다.
+           호출할 때마다 읽도록 미뤄 두면 그런 일이 없다.
+
+    Args:
+        base_dir (Path): 스크립트가 있는 폴더.
+        filename (str | None): 찾을 파일 이름. None 이면 DATA_FILE 을 쓴다.
+
+    Returns:
+        Path: 찾은 파일 경로.
+
+    Raises:
+        FileNotFoundError: 두 곳 모두에 파일이 없는 경우.
+    """
+    filename = filename or DATA_FILE
+    candidates = [base_dir / filename, base_dir.parent / filename]
+    for path in candidates:
+        if path.exists():
+            return path
+
+    # 어디를 찾아봤는지 알려주지 않으면 담당자가 파일을 어디 둬야 할지 알 수 없다
+    찾아본_곳 = " / ".join(str(path) for path in candidates)
+    raise FileNotFoundError(f"'{filename}'을 찾을 수 없습니다. 찾아본 경로: {찾아본_곳}")
 
 
 def load_sales(path):
@@ -1269,10 +1303,11 @@ def run_pipeline(base_dir):
         dict: 보고서 작성에 필요한 실행 결과 모음.
 
     Raises:
+        FileNotFoundError: 입력 파일을 찾지 못한 경우.
         ValueError: 데이터가 비었거나 IQR 필터 통과 행이 0건인 경우.
         AssertionError: 자체 검증에 실패한 경우.
     """
-    data_path = base_dir / DATA_FILE
+    data_path = find_data_file(base_dir)
 
     # 파일이 지나치게 크면 읽는 순간 메모리를 대부분 차지한다. 미리 알려두면
     # 담당자가 중단하거나 더 큰 환경에서 다시 돌릴지 판단할 수 있다.
@@ -1409,23 +1444,28 @@ def main():
     # 원본을 메모장·엑셀에서 저장하면 UTF-8 이 아닌 인코딩(CP949 등)으로 저장되는 일이 잦다.
     # 이 경우 파일도 멀쩡하고 형식도 맞아서, 원인을 짚어주지 않으면 찾기 어렵다.
     except UnicodeDecodeError:
-        logger.error(f"[오류] 파일 인코딩이 UTF-8이 아닙니다: {base_dir / DATA_FILE}")
+        logger.error(f"[오류] 파일 인코딩이 UTF-8이 아닙니다: {DATA_FILE}")
         logger.error("       원본 파일을 UTF-8로 다시 저장한 뒤 실행해 주세요.")
         return 1
     except pd.errors.EmptyDataError:
-        logger.error(f"[오류] CSV 파일에 내용이 없습니다: {base_dir / DATA_FILE}")
+        logger.error(f"[오류] CSV 파일에 내용이 없습니다: {DATA_FILE}")
         return 1
     except pd.errors.ParserError as error:
-        logger.error(f"[오류] CSV 형식이 잘못됐습니다: {base_dir / DATA_FILE}")
+        logger.error(f"[오류] CSV 형식이 잘못됐습니다: {DATA_FILE}")
         logger.error(f"       {error}")
+        return 1
+    # 파일을 못 찾은 경우는 어디를 찾아봤는지까지 알려야 담당자가 조치할 수 있다.
+    # FileNotFoundError 는 OSError 의 하위 예외라 그보다 먼저 둔다.
+    except FileNotFoundError as error:
+        logger.error(f"[오류] {error}")
+        logger.error(f"       실습 자료의 {DATA_FILE}을 위 경로 중 한 곳에 두고 실행해 주세요.")
         return 1
     except ValueError as error:
         logger.error(f"[오류] 데이터가 예상과 다릅니다: {error}")
         return 1
-    # 파일이 없는 경우와 권한이 없는 경우가 모두 OSError 로 들어온다
+    # 권한이 없어 열지 못하는 경우가 여기로 온다
     except OSError as error:
-        logger.error(f"[오류] 입력 파일을 읽을 수 없습니다: {base_dir / DATA_FILE}")
-        logger.error(f"       {error}")
+        logger.error(f"[오류] 입력 파일을 읽을 수 없습니다: {error}")
         return 1
     # 검증 실패는 결과를 그대로 믿으면 안 된다는 뜻이므로 보고서를 만들지 않는다
     except AssertionError as error:

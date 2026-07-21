@@ -34,7 +34,7 @@ import pytest
 # 제출 파일 경로. 파일 이름이 바뀌면 이 줄만 고치면 된다.
 # 실습 3과 실습 4의 제출 파일명이 같아(캠퍼스명_반_이름.py 규칙) 폴더로 구분한다.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODULE_PATH = PROJECT_ROOT / "광주_1반_박기택.py"
+MODULE_PATH = PROJECT_ROOT / "실습3" / "광주_1반_박기택.py"
 MODULE4_PATH = PROJECT_ROOT / "실습4" / "광주_1반_박기택.py"
 
 # 시험용 CSV 내용.
