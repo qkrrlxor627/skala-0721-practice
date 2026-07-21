@@ -31,8 +31,11 @@ from pathlib import Path
 
 import pytest
 
-# 제출 파일 경로. 파일 이름이 바뀌면 이 한 줄만 고치면 된다.
-MODULE_PATH = Path(__file__).resolve().parent.parent / "광주_1반_박기택.py"
+# 제출 파일 경로. 파일 이름이 바뀌면 이 줄만 고치면 된다.
+# 실습 3과 실습 4의 제출 파일명이 같아(캠퍼스명_반_이름.py 규칙) 폴더로 구분한다.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODULE_PATH = PROJECT_ROOT / "광주_1반_박기택.py"
+MODULE4_PATH = PROJECT_ROOT / "실습4" / "광주_1반_박기택.py"
 
 # 시험용 CSV 내용.
 # 원본과 같은 컬럼 구성을 유지하면서 아래 상황을 모두 담았다.
@@ -113,22 +116,106 @@ def write_sample_csv(path, rows=SAMPLE_ROWS, with_bom=True):
     return path
 
 
+def load_module(path, name):
+    """
+    [기능] 파일 경로를 지정해 파이썬 모듈로 불러온다.
+    [설명] 제출 파일이 한글 이름이라 `import 광주_1반_박기택` 은 읽기 어렵고
+           편집기·검사 도구에서도 잘 인식되지 않는다. 경로로 직접 불러오면
+           파일 이름이 어떻게 바뀌어도 이 함수 하나만 고치면 된다.
+
+    Args:
+        path (Path): 불러올 .py 파일 경로.
+        name (str): 모듈에 붙일 이름.
+
+    Returns:
+        module: 불러온 모듈.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    # 모듈 안에서 자기 자신을 참조하는 경우를 대비해 등록한 뒤 실행한다
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture(scope="session")
 def practice():
     """
-    [기능] 제출 파일을 파이썬 모듈로 불러와 테스트에 넘긴다.
-    [설명] 파일 경로를 지정해 직접 불러오므로 한글 파일 이름의 영향을 받지 않는다.
-           모듈을 매번 다시 불러오면 시간이 낭비되므로 세션 전체에서 한 번만 만든다.
+    [기능] 실습 3 제출 파일을 파이썬 모듈로 불러와 테스트에 넘긴다.
+    [설명] 모듈을 매번 다시 불러오면 시간이 낭비되므로 세션 전체에서 한 번만 만든다.
 
     Returns:
-        module: 광주_1반_박기택.py 모듈.
+        module: 광주_1반_박기택.py (실습 3) 모듈.
     """
-    spec = importlib.util.spec_from_file_location("practice3", MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    # 모듈 안에서 자기 자신을 참조하는 경우를 대비해 등록한 뒤 실행한다
-    sys.modules["practice3"] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_module(MODULE_PATH, "practice3")
+
+
+@pytest.fixture(scope="session")
+def practice4():
+    """
+    [기능] 실습 4 제출 파일을 파이썬 모듈로 불러와 테스트에 넘긴다.
+    [설명] 실습 3과 파일 이름이 같아 폴더로 구분한다. 모듈 이름도 다르게 등록해야
+           sys.modules 에서 서로 덮어쓰지 않는다.
+
+    Returns:
+        module: 실습4/광주_1반_박기택.py 모듈.
+    """
+    return load_module(MODULE4_PATH, "practice4_module")
+
+
+# 실습 4 시험용 데이터 생성에 쓸 값들.
+# 무작위 대신 순번으로 돌려 쓰면 몇 번을 실행해도 같은 데이터가 나와,
+# 테스트가 어느 날 갑자기 실패하는 일이 없다.
+P4_REGIONS = ("서울", "부산", "대구", "")          # 빈 값 → '미상' 으로 채워지는지 확인용
+P4_CATEGORIES = ("전자", "의류", "식품", "")        # 빈 값 → '미분류' 확인용
+P4_PAYMENTS = ("카드", "현금", "계좌이체", "포인트")
+P4_GENDERS = ("M", "F")
+
+
+def write_practice4_sample_csv(path, rows=300, outliers=6):
+    """
+    [기능] 실습 4 테스트용 매출 CSV 를 만든다.
+    [설명] 실습 3 표본(12행)은 실습 4에 쓸 수 없다. 모델을 훈련·검증으로 나누려면
+           최소 100행이 필요하고, 월별 추이를 보려면 날짜가 여러 달에 걸쳐야 하며,
+           회귀가 성립하려면 수량·단가에 변화가 있어야 하기 때문이다.
+
+           원본 데이터의 성격을 그대로 재현한다.
+             - amount = quantity × unit_price (정상 행)
+             - 일부 행은 amount 를 10배로 부풀림 → IQR 이 걸러낼 이상치
+             - region·category 에 빈 값 섞임    → '미상'/'미분류' 로 채워지는지 확인
+             - 날짜가 여러 달에 걸침            → 월별 추이 계산 가능
+
+    Args:
+        path (Path): 만들 CSV 파일 경로.
+        rows (int): 만들 행 수.
+        outliers (int): amount 를 부풀릴 이상치 행 수.
+
+    Returns:
+        Path: 만들어진 파일 경로.
+    """
+    header = (
+        "order_id,order_date,region,category,product_name,"
+        "quantity,unit_price,payment_method,customer_age,customer_gender,amount"
+    )
+    lines = [header]
+    for i in range(rows):
+        quantity = i % 19 + 1
+        unit_price = 1000 + (i * 137) % 90000
+        amount = quantity * unit_price
+        # 앞쪽 몇 건만 10배로 부풀려 IQR 이 걸러낼 이상치로 만든다
+        if i < outliers:
+            amount *= 10
+        월 = i % 3 + 1
+        일 = i % 28 + 1
+        lines.append(
+            f"{i + 1},2024-{월:02d}-{일:02d},"
+            f"{P4_REGIONS[i % len(P4_REGIONS)]},{P4_CATEGORIES[i % len(P4_CATEGORIES)]},"
+            f"상품_{i},{quantity},{unit_price},{P4_PAYMENTS[i % len(P4_PAYMENTS)]},"
+            f"{20 + i % 50},{P4_GENDERS[i % len(P4_GENDERS)]},{amount}"
+        )
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    return path
 
 
 @pytest.fixture

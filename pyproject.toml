@@ -10,7 +10,8 @@ addopts = "-v --cov --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]
 # 제출 대상인 실습 파일만 측정한다. 테스트 코드 자체나 가상환경은 대상이 아니다.
-include = ["광주_1반_박기택.py"]
+# 실습 3(루트)과 실습 4(실습4/)의 파일명이 같아 앞에 * 를 붙여 둘 다 잡는다.
+include = ["*광주_1반_박기택.py"]
 
 [tool.coverage.report]
 # 기준선을 설정으로 못박아 둔다. 테스트 없이 코드만 늘면 여기서 걸린다.

@@ -6,6 +6,13 @@ polars==1.42.1     # Lazy API 집계 (scan_csv → ... → collect)
 duckdb==1.5.4      # SQL GROUP BY 집계
 pyarrow==25.0.0    # Polars 결과를 Pandas DataFrame 으로 변환할 때 사용
 
+# 실습 4 추가분 - 시각화·통계·머신러닝
+matplotlib==3.11.1    # EDA 차트 4종 (2×2 서브플롯)
+scipy==1.17.1         # KDE 곡선, t-test, 카이제곱 검정
+scikit-learn==1.9.0   # ColumnTransformer + Pipeline, 회귀 모델
+plotly==6.9.0         # 인터랙티브 막대 차트 (HTML 저장)
+joblib==1.5.3         # 학습된 Pipeline 저장·재로딩
+
 # 테스트 도구
 pytest==9.1.1      # 단위 테스트
 pytest-cov==7.1.0  # 커버리지 측정 (기준 80%)
