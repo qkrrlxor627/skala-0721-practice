@@ -1,0 +1,22 @@
+# 테스트·커버리지 설정을 한 파일에 모아둔다.
+# 옵션을 매번 손으로 붙여야 하면 아무도 재지 않게 되고, 어느 순간 조용히 기준이 무너진다.
+# 그냥 `pytest` 만 쳐도 항상 측정하고, 기준 아래면 실패하도록 기본값에 넣는다.
+
+[tool.pytest.ini_options]
+# tests/ 에서 프로젝트 루트의 제출 파일을 불러올 수 있도록 경로에 넣는다
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v --cov --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+# 제출 대상인 실습 파일만 측정한다. 테스트 코드 자체나 가상환경은 대상이 아니다.
+include = ["광주_1반_박기택.py"]
+
+[tool.coverage.report]
+# 기준선을 설정으로 못박아 둔다. 테스트 없이 코드만 늘면 여기서 걸린다.
+fail_under = 80
+exclude_also = [
+    # `python 광주_1반_박기택.py` 로 직접 실행할 때만 도는 진입점 가드.
+    # 분석 로직이 아니라 실행 방법이라 테스트로 덮을 대상이 아니다.
+    "if __name__ == .__main__.:",
+]
