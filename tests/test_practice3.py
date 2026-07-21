@@ -508,6 +508,10 @@ def report_context(practice, sample_csv, bounds):
         "rows_before": 12,
         "rows_after": EXPECTED_KEPT_ROWS,
         "rows_removed": 12 - EXPECTED_KEPT_ROWS,
+        # 표본 12행 중 amount 결측 1건, IQR 범위 밖(100000) 1건이 빠진다.
+        # 성격이 다른 두 사유를 합쳐서 보고하면 결측까지 이상치로 잘못 전달된다.
+        "missing_removed": 1,
+        "outlier_removed": 1,
         "result": result,
         "matches": {"Pandas = Polars": True, "Pandas = DuckDB": True},
         "mismatch_reasons": {},
@@ -535,6 +539,20 @@ def test_build_report_플레이스홀더가_남지_않음(practice, report_conte
     assert "입력]" not in report
     assert "[지역]" not in report
     assert "[카테고리]" not in report
+
+
+def test_build_report_제외_사유가_분리되어_표기(practice, report_context):
+    """
+    [기능] 보고서가 제외 건수를 결측과 이상치로 나눠 적는지 확인한다.
+    [설명] "2건의 이상치를 제거했다"고만 쓰면, 금액을 몰라서 뺀 행까지 이상치로
+           읽힌다. 두 사유는 성격이 다르므로 나눠서 보고해야 한다.
+    """
+    report = practice.build_report(report_context)
+
+    assert "결측으로 제외" in report
+    assert "IQR 범위 밖으로 제외" in report
+    # 합쳐서 한 숫자로만 내면 오해가 생긴다는 설명까지 들어 있어야 한다
+    assert "이상치로 잘못 전달" in report
 
 
 def test_build_report_실측값_포함(practice, report_context):

@@ -96,6 +96,16 @@
 |        |             |          | (sparse_output=False 로 통일).    |
 |        |             |          | 선형 모델 R² 가 0.84 로 높게 나온  |
 |        |             |          | 이유를 1차 근사로 규명해 해설 보강 |
+| v1.6   | 2026-07-21  | 박기택   | 검토 의견 반영. (1) p>=0.05 를     |
+|        |             |          | '평균이 같다'·'독립'으로 단정하던  |
+|        |             |          | 표현을 '증거를 찾지 못했다'로 정정 |
+|        |             |          | (귀무가설은 채택 대상이 아님).     |
+|        |             |          | chi2 결과 키도 independent →      |
+|        |             |          | associated 로 변경. (2) 제거 건수를 |
+|        |             |          | 결측·이상치로 분리 보고. (3) 회귀  |
+|        |             |          | 결과가 예측력이 아님을 명시.       |
+|        |             |          | (4) 총매출 순위가 객단가가 아니라  |
+|        |             |          | 거래량 순위임을 표에 주석          |
 ================================================================
 """
 
@@ -393,7 +403,8 @@ def clean_sales(frame):
     Returns:
         tuple[pandas.DataFrame, dict]:
             - 정제된 DataFrame
-            - 정제 내역 dict (q1, q3, iqr, lower, upper, rows_before, rows_after, rows_removed)
+            - 정제 내역 dict (q1, q3, iqr, lower, upper, rows_before, rows_after,
+              rows_removed, missing_removed, outlier_removed)
 
     Raises:
         ValueError: 유효한 amount 가 없거나 IQR 필터를 통과한 행이 없는 경우.
@@ -412,7 +423,9 @@ def clean_sales(frame):
     # between() 은 하한 이상 & 상한 이하를 뜻한다 (양쪽 끝 포함).
     # amount 가 결측이면 between() 이 거짓이 되어 자연히 빠지지만,
     # "결측을 뺀다"는 의도를 코드에 드러내려고 조건을 명시적으로 함께 적는다.
-    clean = frame[values.notna() & values.between(lower, upper)].copy()
+    유효 = values.notna()
+    범위안 = values.between(lower, upper)
+    clean = frame[유효 & 범위안].copy()
     clean = clean.fillna({"region": UNKNOWN_REGION, "category": UNKNOWN_CATEGORY})
     rows_after = len(clean)
 
@@ -421,6 +434,12 @@ def clean_sales(frame):
             f"IQR 정상 범위 [{lower:,.2f}, {upper:,.2f}]를 통과한 행이 없습니다. "
             f"데이터 분포를 확인해 주세요."
         )
+
+    # 제거 사유를 나눠서 센다.
+    # 둘을 합쳐 "26,194건 제거"라고만 하면, 읽는 쪽은 그 전부가 이상치라고 이해한다.
+    # 금액을 아예 모르는 행과 금액이 지나치게 큰 행은 성격이 다르므로 따로 보고한다.
+    missing_removed = int((~유효).sum())
+    outlier_removed = int((유효 & ~범위안).sum())
 
     return clean, {
         "q1": q1,
@@ -431,6 +450,8 @@ def clean_sales(frame):
         "rows_before": rows_before,
         "rows_after": rows_after,
         "rows_removed": rows_before - rows_after,
+        "missing_removed": missing_removed,
+        "outlier_removed": outlier_removed,
     }
 
 
@@ -827,18 +848,22 @@ def interpret_ttest(groups, means, pvalue, cohens_d, significant, total_rows):
     if significant:
         크기 = "작은" if abs(cohens_d) < 0.2 else "중간 이상의"
         return (
-            f"p={pvalue:.4f} < {ALPHA}이므로 {groups[0]}과 {groups[1]}의 평균 매출은 "
-            f"통계적으로 유의하게 다릅니다. 다만 효과크기 d={cohens_d:.3f}로 {크기} 차이이므로, "
+            f"p={pvalue:.4f} < {ALPHA}이므로 {groups[0]}과 {groups[1]}의 평균 매출에 "
+            f"차이가 있다고 판단합니다. 다만 효과크기 d={cohens_d:.3f}로 {크기} 차이이므로, "
             f"실제 금액 차이({차이:,.0f}원, {비율:.2f}%)가 의사결정에 쓸 만한지는 별도로 판단해야 합니다."
         )
 
+    # ※ p >= 유의수준은 '평균이 같다'를 증명한 것이 아니다.
+    #   '차이가 있다고 볼 근거를 찾지 못했다'는 뜻일 뿐이다.
+    #   실무적으로 "차이가 없다"고 말하려면 효과크기와 표본 크기를 함께 근거로 대야 한다.
     return (
-        f"p={pvalue:.4f} >= {ALPHA}이므로 {groups[0]}과 {groups[1]}의 평균 매출 차이는 "
-        f"통계적으로 유의하지 않습니다. 표본이 {total_rows:,}건으로 충분히 큰데도 차이가 잡히지 "
-        f"않았다는 것은, 검정력이 부족한 게 아니라 실제 차이가 거의 없다는 뜻입니다. "
-        f"효과크기도 d={cohens_d:.3f}로 무시할 수준입니다"
-        f"(평균 차이 {차이:,.0f}원, {비율:.2f}%). "
-        f"따라서 두 지역을 나눠 다르게 대응할 통계적 근거는 없습니다."
+        f"p={pvalue:.4f} >= {ALPHA}이므로 {groups[0]}과 {groups[1]}의 평균 매출에 "
+        f"차이가 있다는 증거를 찾지 못했습니다. 이는 '두 평균이 같다'가 증명된 것이 아니라, "
+        f"차이가 있다고 판단할 근거가 부족하다는 뜻입니다. "
+        f"다만 표본이 {total_rows:,}건으로 충분히 크고 효과크기도 d={cohens_d:.3f}로 "
+        f"무시할 수준이므로(평균 차이 {차이:,.0f}원, {비율:.2f}%), "
+        f"실무적으로 의미 있는 차이는 없다고 봐도 무리가 없습니다. "
+        f"두 지역을 나눠 다르게 대응할 근거는 확인되지 않았습니다."
     )
 
 
@@ -859,7 +884,10 @@ def run_chi2_test(frame, columns=CHI2_COLUMNS):
 
     Returns:
         dict: 검정 결과 (columns, table_shape, statistic, pvalue, dof, cramers_v,
-              independent, min_expected, interpretation).
+              associated, min_expected, interpretation).
+              associated 는 '연관성이 확인되었는가'(p < 유의수준)를 뜻한다.
+              '독립인가'로 이름 붙이지 않은 이유는, 검정이 독립임을 증명할 수는 없고
+              연관이 있다는 증거를 찾았는지만 답할 수 있기 때문이다.
 
     Raises:
         ValueError: 분할표를 만들 수 없는 경우.
@@ -890,7 +918,7 @@ def run_chi2_test(frame, columns=CHI2_COLUMNS):
     n = int(table.to_numpy().sum())
     cramers_v = np.sqrt(chi2 / (n * min(table.shape[0] - 1, table.shape[1] - 1)))
 
-    independent = bool(pvalue >= ALPHA)
+    associated = bool(pvalue < ALPHA)
     return {
         "columns": columns,
         "table_shape": table.shape,
@@ -898,44 +926,47 @@ def run_chi2_test(frame, columns=CHI2_COLUMNS):
         "pvalue": float(pvalue),
         "dof": int(dof),
         "cramers_v": float(cramers_v),
-        "independent": independent,
+        "associated": associated,
         "min_expected": min_expected,
         "interpretation": interpret_chi2(
-            columns, float(pvalue), float(cramers_v), independent, n
+            columns, float(pvalue), float(cramers_v), associated, n
         ),
     }
 
 
-def interpret_chi2(columns, pvalue, cramers_v, independent, total_rows):
+def interpret_chi2(columns, pvalue, cramers_v, associated, total_rows):
     """
     [기능] 카이제곱 검정 결과를 사람이 읽을 문장으로 바꾼다.
-    [설명] 독립인지 아닌지와 그것이 실무적으로 무엇을 뜻하는지를 함께 적는다.
+    [설명] 연관성을 확인했는지와 그것이 실무적으로 무엇을 뜻하는지를 함께 적는다.
 
     Args:
         columns (tuple[str, str]): 검정한 두 컬럼 이름.
         pvalue (float): 검정의 p-value.
         cramers_v (float): 효과크기 Cramér's V.
-        independent (bool): 독립 여부.
+        associated (bool): 연관성이 확인되었는지 여부.
         total_rows (int): 검정에 쓴 전체 표본 수.
 
     Returns:
         str: 해석 문장.
     """
     first, second = columns
-    if independent:
+    if associated:
+        강도 = "약한" if cramers_v < 0.1 else ("중간" if cramers_v < 0.3 else "강한")
         return (
-            f"p={pvalue:.4f} >= {ALPHA}이므로 {first}와 {second}는 서로 독립이라고 판단합니다. "
-            f"즉 지역이 달라도 팔리는 카테고리의 구성은 사실상 같습니다. "
-            f"효과크기 Cramér's V={cramers_v:.4f}로 관계의 강도도 거의 0입니다"
-            f"(표본 {total_rows:,}건). 지역별로 상품 구성을 달리할 근거는 확인되지 않았습니다."
+            f"p={pvalue:.4f} < {ALPHA}이므로 {first}와 {second} 사이에 연관성이 있다고 "
+            f"판단합니다. 즉 지역에 따라 팔리는 카테고리 구성에 차이가 있습니다. "
+            f"다만 Cramér's V={cramers_v:.4f}로 {강도} 관계이므로, 차이의 크기까지 고려해 "
+            f"대응 여부를 정해야 합니다(표본 {total_rows:,}건)."
         )
 
-    강도 = "약한" if cramers_v < 0.1 else ("중간" if cramers_v < 0.3 else "강한")
+    # ※ p >= 유의수준은 '두 변수가 독립'임을 증명한 것이 아니다.
+    #   '연관이 있다고 볼 근거를 찾지 못했다'는 뜻일 뿐이다.
     return (
-        f"p={pvalue:.4f} < {ALPHA}이므로 {first}와 {second}는 독립이 아니라고 판단합니다. "
-        f"즉 지역에 따라 팔리는 카테고리 구성에 차이가 있습니다. "
-        f"다만 Cramér's V={cramers_v:.4f}로 {강도} 관계이므로, 차이의 크기까지 고려해 "
-        f"대응 여부를 정해야 합니다(표본 {total_rows:,}건)."
+        f"p={pvalue:.4f} >= {ALPHA}이므로 {first}와 {second} 사이에 연관성이 있다는 증거를 "
+        f"찾지 못했습니다. 이는 '두 변수가 독립'임이 증명된 것이 아니라, 연관이 있다고 "
+        f"판단할 근거가 부족하다는 뜻입니다. "
+        f"다만 효과크기 Cramér's V={cramers_v:.4f}로 연관의 강도도 거의 0이므로"
+        f"(표본 {total_rows:,}건), 지역별로 상품 구성을 달리할 근거는 확인되지 않았습니다."
     )
 
 
@@ -1230,16 +1261,19 @@ def print_summary(context):
     logger.info("\n" + "=" * 76)
     logger.info(" 핵심 결과")
     logger.info("=" * 76)
+    # 판정 문구에 '같다' / '독립' 을 쓰지 않는다.
+    # 검정이 답할 수 있는 것은 '차이·연관을 확인했는가'뿐이고,
+    # 없음을 증명할 수는 없기 때문이다.
     logger.info(
         f" [1] t-test ({ttest['groups'][0]} vs {ttest['groups'][1]})"
         f"      t={ttest['statistic']:.3f}, p={ttest['pvalue']:.4f} "
-        f"→ {'유의함' if ttest['significant'] else '유의하지 않음'} "
+        f"→ {'차이 확인됨' if ttest['significant'] else '차이 미확인'} "
         f"(d={ttest['cohens_d']:.3f})"
     )
     logger.info(
         f" [2] 카이제곱 ({chi2['columns'][0]}×{chi2['columns'][1]})"
         f"   χ²={chi2['statistic']:.2f}, p={chi2['pvalue']:.4f} "
-        f"→ {'독립' if chi2['independent'] else '연관 있음'} "
+        f"→ {'연관성 확인됨' if chi2['associated'] else '연관성 미확인'} "
         f"(V={chi2['cramers_v']:.4f})"
     )
     logger.info(
@@ -1247,8 +1281,8 @@ def print_summary(context):
         f"{선형['name']} R²={선형['r2']:.4f} / {트리['name']} R²={트리['r2']:.4f}"
     )
     logger.info(
-        f"                                전처리는 동일하고 모델만 교체했습니다 "
-        f"(Pipeline 이 있어 가능한 비교)"
+        f"                                전처리 동일, 모델만 교체 — 예측력이 아니라 "
+        f"모델 교체 효과를 본 실습입니다 (상세 3 참고)"
     )
     logger.info(
         f" [4] 저장 산출물                차트 PNG / 모델 joblib / Plotly HTML "
@@ -1270,6 +1304,14 @@ def print_summary(context):
             + pad(f"{row.count:,}", 10, "right")
         )
     logger.info(f"\n[매출 상위 {TOP_N}개 그룹]\n" + "\n".join(줄))
+    # 총매출 순위를 '어디가 더 잘 판다'로 읽으면 규모와 객단가를 혼동하게 된다.
+    평균범위 = (표["mean"].min(), 표["mean"].max())
+    logger.info(
+        f"  ※ 이 순위는 거래 '건수'가 많은 지역이 올라온 결과입니다. "
+        f"상위 {TOP_N}개 그룹의 평균 객단가는 "
+        f"{format_won(평균범위[0])}~{format_won(평균범위[1])}로 서로 비슷하므로,\n"
+        f"    '어디가 더 비싸게 파는가'가 아니라 '어디에 거래가 몰려 있는가'로 읽어야 합니다."
+    )
 
 
 def print_details(context):
@@ -1304,8 +1346,11 @@ def print_details(context):
     )
     logger.info(
         f"- 제거 전 {정제['rows_before']:,}행 → 제거 후 {정제['rows_after']:,}행 "
-        f"({정제['rows_removed']:,}건 제거)"
+        f"(총 {정제['rows_removed']:,}건 제외)"
     )
+    # 제거 사유를 나눠 보고한다. 합쳐서 한 숫자로만 내면 전부 이상치였다고 오해한다.
+    logger.info(f"    · {TARGET_COLUMN} 결측으로 제외 : {정제['missing_removed']:,}건")
+    logger.info(f"    · IQR 범위 밖으로 제외  : {정제['outlier_removed']:,}건")
     logger.info(f"\n[df.info()]\n{context['info_text']}")
     logger.info(f"\n[describe()]\n{context['describe_text']}")
 
@@ -1353,7 +1398,11 @@ def print_details(context):
     logger.info(f"- 효과크기 : Cohen's d = {ttest['cohens_d']:.4f}")
     logger.info(
         f"- 판정     : p {'<' if ttest['significant'] else '>='} {ALPHA} → "
-        f"{'유의함 (평균이 다르다)' if ttest['significant'] else '유의하지 않음 (평균이 같다고 볼 수 있다)'}"
+        + (
+            "차이가 있다고 판단"
+            if ttest["significant"]
+            else "차이가 있다는 증거를 찾지 못함 (평균이 같음을 증명한 것은 아님)"
+        )
     )
     logger.info(f"- 해석     : {ttest['interpretation']}")
 
@@ -1367,8 +1416,12 @@ def print_details(context):
     logger.info(f"- p-value  : {chi2['pvalue']:.6f}")
     logger.info(f"- 효과크기 : Cramér's V = {chi2['cramers_v']:.4f}")
     logger.info(
-        f"- 판정     : p {'>=' if chi2['independent'] else '<'} {ALPHA} → "
-        f"{'독립 (관계 없음)' if chi2['independent'] else '독립 아님 (관계 있음)'}"
+        f"- 판정     : p {'<' if chi2['associated'] else '>='} {ALPHA} → "
+        + (
+            "연관성이 있다고 판단"
+            if chi2["associated"]
+            else "연관성이 있다는 증거를 찾지 못함 (독립임을 증명한 것은 아님)"
+        )
     )
     logger.info(f"- 해석     : {chi2['interpretation']}")
 
@@ -1402,8 +1455,18 @@ def print_details(context):
         f"  1차 근사(p̄·q + q̄·p)가 잘 통해 R²={선형['r2']:.4f}까지 올라갑니다.\n"
         f"  남는 (q-q̄)(p-p̄) 교호작용 항이 전체 분산의 약 14%를 차지하고, 이것이\n"
         f"  선형 모델이 원리적으로 넘을 수 없는 한계선(이론상 최대 R² ≈ 0.86)입니다.\n"
-        f"  {트리['name']} 은 구간을 나눠 이 교호작용을 학습해 R²={트리['r2']:.4f}로 그 벽을 넘습니다.\n"
-        f"  전처리를 그대로 두고 모델만 갈아끼울 수 있다는 것이 Pipeline 으로 묶어 두는 이유입니다."
+        f"  {트리['name']} 은 구간을 나눠 이 교호작용을 학습해 R²={트리['r2']:.4f}로 그 벽을 넘습니다."
+    )
+    # 성능 숫자만 남으면 "매출을 잘 맞히는 모델을 만들었다"로 읽힌다.
+    # 이 실습에서 확인한 것이 무엇이고 무엇이 아닌지를 분명히 적어 둔다.
+    logger.info(
+        f"\n- [이 결과의 한계] 예측력이 좋다는 뜻이 아닙니다.\n"
+        f"  예측 대상 {TARGET_COLUMN} 가 입력 변수 quantity × unit_price 로 이미 결정되는 값이라,\n"
+        f"  모델에 정답의 재료를 그대로 넣어 준 셈입니다. 여기서 확인한 것은\n"
+        f"  '비선형 모델이 곱셈 관계를 선형 모델보다 잘 학습한다'는 사실과,\n"
+        f"  전처리를 Pipeline 으로 묶어 두면 모델만 갈아끼워 이런 비교를 할 수 있다는 점입니다.\n"
+        f"  실제 예측 과제라면 주문 시점에 아직 알 수 없는 값(예: 다음 달 수요)을 대상으로 삼고,\n"
+        f"  quantity·unit_price 같은 사후 정보는 입력에서 빼야 합니다."
     )
 
     # ---- 상세 4: 생성 파일 ----
@@ -1478,7 +1541,7 @@ def run_pipeline(base_dir):
     chi2 = run_chi2_test(clean)
     logger.info(
         f"[3/5] 통계 검정 완료 — t-test {'유의함' if ttest['significant'] else '유의하지 않음'} / "
-        f"카이제곱 {'독립' if chi2['independent'] else '연관 있음'}"
+        f"카이제곱 {'연관성 확인됨' if chi2['associated'] else '연관성 미확인'}"
     )
 
     # ---- 4단계: Pipeline 학습·평가·저장 ------------------------------------

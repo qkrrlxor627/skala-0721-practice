@@ -274,9 +274,9 @@ def test_chi2_결과에_판정과_해석이_포함(practice4, clean4):
     """[기능] 카이제곱 검정이 판정(독립 여부)과 해석까지 내는지 확인한다."""
     결과 = practice4.run_chi2_test(clean4, columns=("region", "category"))
 
-    assert set(결과) >= {"statistic", "pvalue", "dof", "cramers_v", "independent", "interpretation"}
+    assert set(결과) >= {"statistic", "pvalue", "dof", "cramers_v", "associated", "interpretation"}
     # 독립 판정이 p-value 와 일치하는지 (t-test 와 부등호 방향이 반대인 점에 주의)
-    assert 결과["independent"] == (결과["pvalue"] >= practice4.ALPHA)
+    assert 결과["associated"] == (결과["pvalue"] < practice4.ALPHA)
     assert str(practice4.ALPHA) in 결과["interpretation"]
 
 
@@ -296,9 +296,53 @@ def test_해석문이_p값에_따라_갈라짐(practice4):
     유의함 = practice4.interpret_ttest(("A", "B"), (100.0, 200.0), 0.001, 0.8, True, 1000)
     유의하지않음 = practice4.interpret_ttest(("A", "B"), (100.0, 101.0), 0.9, 0.01, False, 1000)
 
-    assert "유의하게 다릅니다" in 유의함
-    assert "유의하지 않습니다" in 유의하지않음
+    assert "차이가 있다고 판단합니다" in 유의함
+    assert "증거를 찾지 못했습니다" in 유의하지않음
     assert 유의함 != 유의하지않음
+
+
+def test_귀무가설을_채택했다고_말하지_않음(practice4, clean4):
+    """
+    [기능] p >= 유의수준일 때 '같다'/'독립'으로 단정하지 않는지 확인한다.
+    [설명] 통계 검정은 '차이·연관이 있다'는 증거를 찾았는지만 답할 수 있고,
+           '차이·연관이 없다'를 증명하지는 못한다. 이를 '평균이 같다',
+           '두 변수는 독립이다'라고 쓰면 통계적으로 틀린 진술이 된다.
+           문구가 되돌아가지 않도록 테스트로 고정한다.
+    """
+    ttest = practice4.run_ttest(clean4, groups=("서울", "부산"))
+    chi2 = practice4.run_chi2_test(clean4, columns=("region", "category"))
+
+    # 금지어는 '단정하는 서술'만 고른다.
+    # "'두 평균이 같다'가 증명된 것이 아니라" 처럼 부정하는 문장 안에도 같은 낱말이
+    # 들어가므로, 낱말이 아니라 단정 어미까지 포함한 표현으로 검사해야 한다.
+    for 결과, 금지어 in (
+        (ttest, ("같다고 볼 수 있다", "평균이 같습니다", "차이가 없습니다")),
+        (chi2, ("독립이라고 판단", "독립입니다", "관계 없음")),
+    ):
+        if 결과.get("significant") or 결과.get("associated"):
+            continue  # 유의한 경우에는 해당 문구 자체가 나오지 않는다
+        for 말 in 금지어:
+            assert 말 not in 결과["interpretation"], (
+                f"귀무가설을 증명한 것처럼 표현했습니다: '{말}'"
+            )
+        # 대신 '증거를 찾지 못했다'는 취지와, 증명이 아니라는 단서가 함께 있어야 한다
+        assert "찾지 못했습니다" in 결과["interpretation"]
+        assert "증명된 것이 아니라" in 결과["interpretation"]
+
+
+def test_제거_사유가_결측과_이상치로_분리됨(practice4, sample4_csv):
+    """
+    [기능] 제거 건수가 'amount 결측'과 'IQR 범위 밖'으로 나뉘어 보고되는지 확인한다.
+    [설명] 둘을 합쳐 한 숫자로만 내면 읽는 쪽은 전부 이상치였다고 이해한다.
+           금액을 모르는 행과 금액이 지나치게 큰 행은 성격이 다르므로 구분해야 한다.
+    """
+    frame = practice4.load_sales(sample4_csv)
+    _, info = practice4.clean_sales(frame)
+
+    assert "missing_removed" in info and "outlier_removed" in info
+    # 두 사유의 합이 전체 제거 건수와 맞아야 한다 (빠지거나 중복 계산된 행이 없음)
+    assert info["missing_removed"] + info["outlier_removed"] == info["rows_removed"]
+    assert info["rows_before"] - info["rows_removed"] == info["rows_after"]
 
 
 # ================================================================

@@ -872,9 +872,10 @@ def print_summary(context):
     )
     logger.info(f"                         {speed_text} (1회 평균)")
     logger.info(
-        f" [3] 이상치 제거         {context['rows_before']:,}행 → "
+        f" [3] 결측·이상치 제외     {context['rows_before']:,}행 → "
         f"{context['rows_after']:,}행 "
-        f"({context['rows_removed']:,}건 제거, {removed_ratio:.1f}%)"
+        f"(총 {context['rows_removed']:,}건 = 결측 {context['missing_removed']:,} "
+        f"+ 범위 밖 {context['outlier_removed']:,}, {removed_ratio:.1f}%)"
     )
     logger.info(
         f" [4] 매출 1위 그룹       {top.region}·{top.category} "
@@ -924,7 +925,10 @@ def print_details(context):
     )
     logger.info(f"- 제거 전 행 수: {context['rows_before']:,}행")
     logger.info(f"- 제거 후 행 수: {context['rows_after']:,}행")
-    logger.info(f"- 제거된 이상치: {context['rows_removed']:,}건")
+    logger.info(f"- 제외된 행: 총 {context['rows_removed']:,}건")
+    # 제거 사유를 나눠 보고한다. 한 숫자로만 내면 전부 이상치였다고 오해한다.
+    logger.info(f"    · {TARGET_COLUMN} 결측으로 제외 : {context['missing_removed']:,}건")
+    logger.info(f"    · IQR 범위 밖으로 제외  : {context['outlier_removed']:,}건")
 
     logger.info("\n[상세 3] 세 도구 결과 동일성")
     for name, ok in context["matches"].items():
@@ -1104,11 +1108,20 @@ IQR = Q3 - Q1
 | 정상 범위 상한 | {bounds.upper:,.2f} |
 | 제거 전 행 수 | {context["rows_before"]:,}행 |
 | 제거 후 행 수 | {context["rows_after"]:,}행 |
-| 제거된 이상치 | {context["rows_removed"]:,}건 |
+| 제외된 행 (합계) | {context["rows_removed"]:,}건 |
+| └ `{TARGET_COLUMN}` 결측으로 제외 | {context["missing_removed"]:,}건 |
+| └ IQR 범위 밖으로 제외 | {context["outlier_removed"]:,}건 |
 
 ### 2.3 이상치 처리 해석
 
-`{TARGET_COLUMN}`가 {bounds.lower:,.2f} 이상 {bounds.upper:,.2f} 이하인 데이터를 정상 범위로 판단했습니다. 전체 {context["rows_before"]:,}건 중 {context["rows_removed"]:,}건을 이상치 후보로 제거했으며, 최종 {context["rows_after"]:,}건을 집계에 사용했습니다. 제거된 {context["rows_removed"]:,}건에는 금액이 상한을 넘는 고액 거래와 금액이 비어 있는 {eda["null_counts"].get(TARGET_COLUMN, 0):,}건이 함께 포함됩니다.{lower_note}
+`{TARGET_COLUMN}`가 {bounds.lower:,.2f} 이상 {bounds.upper:,.2f} 이하인 데이터를 정상 범위로 판단했습니다. 전체 {context["rows_before"]:,}건 중 **{context["rows_removed"]:,}건을 집계에서 제외**했으며, 최종 {context["rows_after"]:,}건을 사용했습니다.
+
+제외 사유는 성격이 다른 두 가지이므로 나눠서 봐야 합니다.
+
+- **`{TARGET_COLUMN}` 결측 {context["missing_removed"]:,}건** — 금액을 아예 알 수 없어 집계할 수 없는 행입니다. 이상치가 아닙니다.
+- **IQR 범위 밖 {context["outlier_removed"]:,}건** — 금액이 상한을 넘는 고액 거래입니다. 이쪽이 이상치입니다.
+
+둘을 합쳐 "{context["rows_removed"]:,}건의 이상치를 제거했다"고 적으면 결측 {context["missing_removed"]:,}건까지 이상치로 잘못 전달됩니다.{lower_note}
 
 ---
 
@@ -1282,14 +1295,19 @@ def run_pipeline(base_dir):
     bounds = compute_iqr_bounds(frame[TARGET_COLUMN])
     rows_before = len(frame)
     # 세 도구가 쓸 필터 조건과 완전히 같은 식이어야 검증이 의미를 가진다
-    kept = frame[
-        frame[TARGET_COLUMN].notna()
-        & frame[TARGET_COLUMN].between(bounds.lower, bounds.upper)
-    ]
+    유효 = frame[TARGET_COLUMN].notna()
+    범위안 = frame[TARGET_COLUMN].between(bounds.lower, bounds.upper)
+    kept = frame[유효 & 범위안]
     rows_after = len(kept)
 
+    # 제거 사유를 나눠서 센다. 합쳐서 한 숫자로만 내면 전부 이상치였다고 오해한다.
+    # 금액을 아예 모르는 행과 금액이 지나치게 큰 행은 성격이 다르다.
+    missing_removed = int((~유효).sum())
+    outlier_removed = int((유효 & ~범위안).sum())
+
     logger.info(
-        f"[2/5] IQR 이상치 제거 완료 — {rows_before:,}행 → {rows_after:,}행"
+        f"[2/5] 결측·IQR 이상치 제외 완료 — {rows_before:,}행 → {rows_after:,}행 "
+        f"(결측 {missing_removed:,} + 범위 밖 {outlier_removed:,})"
     )
 
     # 필터가 전부 걸러냈다면 이후 집계는 빈 표만 낸다. 그 전에 이상 상황으로 알린다.
@@ -1358,6 +1376,8 @@ def run_pipeline(base_dir):
         "rows_before": rows_before,
         "rows_after": rows_after,
         "rows_removed": rows_before - rows_after,
+        "missing_removed": missing_removed,
+        "outlier_removed": outlier_removed,
         "result": result,
         "matches": matches,
         "mismatch_reasons": mismatch_reasons,
